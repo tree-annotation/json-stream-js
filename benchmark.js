@@ -3,41 +3,91 @@ import {SymToJsonEvent} from './SymToJsonEvent.js'
 
 export const JsonEventToDao = () => {
   let ret = ''
-  let depth = 0
+  let mode = 'top'
 
   // note: what is lost in translation: top-level padding
   //   commas, colons
 
-  let buf = ''
+  let hexBuf = ''
   return {
     push: (event) => {
       // console.log(event)
       const {id} = event
 
-      if (id === 'buffer') {
-        buf += event.sym
-      } else if (id === 'whitespace') {
+      // todo: what about an array like [{}] or [[]]?
+      // vs isEmpty
+      // need a stack for arrays
 
-      } else if (['open object', 'open array'].includes(id)) {
-        ret += '['
-        // buf = ''
-      } else if (['close object', 'close array'].includes(id)) {
-        ret += ']'
-        // buf = ''
-      } else if (id === 'string') {
-        ret += '[' + JSON.parse(buf).replace(/(`|\[|\])/g, '`$1') + ']'
-        buf = ''
-      } else if (id === 'number') {
-        ret += '[' + buf + ']'
-        buf = ''
-      } else if (['true', 'false', 'null'].includes(id)) {
-        ret += '[' + id + ']'
-        buf = ''
-      } else if (id === 'key') {
-        ret += JSON.parse(buf).replace(/(`|\[|\])/g, '`$1')
-        buf = ''
-      } else if (['comma', 'colon'].includes(id)) {
-      } else throw Error(`unrecognized event ${id}`)
+      if (mode === 'top') {
+        if (id === 'open string') {
+          ret += '['
+          mode = 'string'
+        } else if (id === 'open key') {
+          mode = 'string'
+        } else if (id === 'open number') {
+          ret += '['
+          mode = 'number'
+        } else if (['open object', 'open array'].includes(id)) {
+          ret += '['
+        } else if (['close object', 'close array'].includes(id)) {
+          ret += ']'
+        } else if (id === 'close true') {
+          ret += '[true]'
+        } else if (id === 'close false') {
+          ret += '[false]'
+        } else if (id === 'close null') {
+          ret += '[null]'
+        } else if (['comma', 'colon'].includes(id)) {
+          // todo?
+        } else if (id === 'whitespace') {
+          // ret += event.sym
+        } else throw Error(`unrecognized event ${id}`)
+      } else if (mode === 'string') {
+        if (id === 'buffer') {
+          const {sym} = event
+          if ('[]`'.includes(sym)) ret += '`' + sym
+          else ret += sym
+        } else if (id === 'escape') {
+          mode = 'escape'
+        } else if (id === 'open hex') {
+          hexBuf = ''
+          mode = 'hex'
+        } else if (id === 'close string') {
+          ret += ']'
+          mode = 'top'
+        } else if (id === 'close key') {
+          mode = 'top'
+        }
+      } else if (mode === 'escape') {
+        if (id === 'buffer') {
+          const {sym} = event
+          if (sym === 'n') ret += '\n'
+          else if (sym === 't') ret += '\t'
+          else if (sym === 'r') ret += '\r'
+          else if (sym === 'b') ret += '\b'
+          else if (sym === 'f') ret += '\f'
+          else if (sym === '"') ret += '"'
+          else if (sym === '\\') ret += '\\'
+          else if (sym === '/') ret += '/'
+          mode = 'string'
+        }
+      } else if (mode === 'hex') {
+        if (id === 'buffer') {
+          hexBuf += event.sym
+        } else if (id === 'close hex') {
+          ret += Number.parseInt(hexBuf, 16)
+          mode = 'string'
+        }
+      } else if (mode === 'number') {
+        if (id === 'buffer') {
+          ret += event.sym
+        } else if (id === 'close number') {
+          ret += ']'
+          mode = 'top'
+        }
+      } else {
+        throw Error('unknown mode')
+      }
     },
     end: (event) => {
       const r = ret

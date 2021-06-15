@@ -22,44 +22,62 @@ const isWhitespace = (sym) => {
   return sym === ' ' || sym === '\n' || sym === '\t' || sym === '\r'
 }
 
-// todo?: perhaps Continue should be Ok
 // todo?: maybe if eat before emit returns error, the parser should stop with error too
-const Continue = {id: 'continue'}
-const Mismatch = {id: 'mismatch'}
 
-// todo?: make trailing commas invalid by treating first value different from next/last value
-
-// might be useful to have open string and close string events
-//    
-// where you can decide to ignore the string -- same for key?
-// this could make sense to ignore values of certain keys
-//  could even set event granularity, e.g. events for substrings, where you could search strings for some needle
+// todo?: make trailing commas invalid by treating first value different from next/last value; OR introduce an option for trailing commas
 
 // todo: JsonEventType.true, ...
-
+// SymToJson.make
 // todo?: replace f*alse, f[a]lse w/ f|alse, etc.
-
 // todo: nice error msgs
 
 // todo: check if next.push(type) is more optimal than next.push({type})
-//    and if next.push('buffer', sym) is more optimal than next.push({type: 'buffer', sym})
-//    another opton: next.push('buffer', {sym})
+//    and if next.push(JsonEventType.buffer, sym) is more optimal than next.push({type: JsonEventType.buffer, sym})
+//    another opton: next.push(JsonEventType.buffer, {sym})
 
 // todo: built-in line, col, pos information; in particular in returned {id: error} feedback msgs
 
 // todo: more test suites
 
-// SymToJson.make
 
 // possible opt: dont emit eat on true, false, null (marginal)
 // todo: should we continue to throw if (isDone) or ret error?
 
-// todo: add if parent/top to closeParent
-// todo: call closeParent in value, merge 'initial' & '*value'
+
+export const JsonEventType = {
+  openObject: 'open object',
+  openArray: 'open array',
+  openString: 'open string',
+  openNumber: 'open number',
+  // todo?: just have [close]true, false, null
+  openTrue: 'open true',
+  openFalse: 'open false',
+  openNull: 'open null',
+  closeObject: 'close object',
+  closeArray: 'close array',
+  closeString: 'close string',
+  closeNumber: 'close number',
+  closeTrue: 'close true',
+  closeFalse: 'close false',
+  closeNull: 'close null',
+
+  openKey: 'open key',
+  openHex: 'open hex',
+  closeKey: 'close key',
+  closeHex: 'close hex',
+
+  // todo: perhaps rename to symbol or sym or sth
+  buffer: 'buffer',
+  escape: 'escape',
+  whitespace: 'whitespace',
+  comma: 'comma',
+  colon: 'colon',
+}
+
 
 export const SymToJsonEvent = (next) => {
   let isDone = false
-  let choiceId = 'initial'
+  let choiceId = '*value'
   let parents = ['top']
   let hexSeqIdx = 0
 
@@ -67,30 +85,29 @@ export const SymToJsonEvent = (next) => {
   // ? todo: error recovery mechanism that doesn't reset state completely?
   const reset = () => {
     isDone = false
-    // todo: rename to stateId? stateLabel?
-    choiceId = 'initial'
+    // todo: rename to stateId? stateLabel? mode?
+    choiceId = '*value'
     parents = ['top']
     hexSeqIdx = 0
   }
 
   // todo?: remove, error on end shows only choiceId
   const dumpState = () => JSON.stringify({
-    isDone, 
     choiceId, 
     parents,
   })
 
-  const eat = (sym) => { return next.push({id: 'buffer', sym}) }
+  const eat = (sym) => { return next.push({id: JsonEventType.buffer, sym}) }
   // todo: eatEmitFork
   const eatFork = (sym, nextChoiceId) => {
     choiceId = nextChoiceId
-    return next.push({id: 'buffer', sym})
+    return next.push({id: JsonEventType.buffer, sym})
   }
-  const eatPrefix = (sym) => { return next.push({id: 'whitespace', sym}) }
+  const eatPrefix = (sym) => { return next.push({id: JsonEventType.whitespace, sym}) }
   // todo: add sym arg, eatEmit
   const emit = (id, nextChoiceId) => {
-    // todo: id -> type
     choiceId = nextChoiceId
+    // todo: id -> type
     return next.push({
       id,
     })
@@ -100,7 +117,7 @@ export const SymToJsonEvent = (next) => {
   // todo? in most cases eat, emitvalue could be replaced with eatemitvalue
   const emitValue = (id) => {
     const parent = parents[parents.length - 1]
-    return emit(id, parent === 'top'? 'initial': 'value*')
+    return emit(id, parent === 'top'? '*value': 'value*')
   }
 
   // returning continue, next.push result, setting status ready for .end()
@@ -110,54 +127,6 @@ export const SymToJsonEvent = (next) => {
     // todo? special error status
     isDone = true
     return {id: 'error', message}
-  }
-
-  const value = (sym) => {
-    switch (sym) {
-      case '{': {
-        parents.push('object')
-        parents.push('key')
-        // todo: eatEmitFork(sym, 'open object', '*key')
-        return emit('open object', '*key')
-      }
-      case '[': {
-        parents.push('array')
-        // todo: eatEmitFork(sym, 'open array', '*value')
-        return emit('open array', '*value')
-      }
-      // todo: eatEmitFork(sym, 'open string', '"*')
-      case '"': return emit('open string', '"*')
-      // todo: eatEmitFork(sym, 'open true', 't*rue')
-      case 't': return emit('open true', 't*rue')
-      // todo: eatEmitFork(sym, 'open false', 'f*alse')
-      case 'f': return emit('open false', 'f*alse')
-      // todo: eatEmitFork(sym, 'open null', 'n*ull')
-      case 'n': return emit('open null', 'n*ull')
-      // todo: eatEmitFork(sym, 'open number', '-*')
-      case '-': {
-        emit('open number', '-*')
-        return eat(sym)
-      }
-      // todo: eatEmitFork(sym, 'open number', '0*')
-      case '0': {
-        emit('open number', '0*')
-        return eat(sym)
-      }
-      default: {
-        // todo: eatEmitFork(sym, 'open number', '1-9*')
-        // todo: '1-9*' -> '[1-9]*'
-        if (isOneNine(sym)) {
-          emit('open number', '1-9*')
-          return eat(sym)
-        }
-        if (isWhitespace(sym)) return eatPrefix(sym)
-
-        // return closeParent(sym)
-
-        // return {id: 'error', message: `Unexpected symbol in value ${sym}`}
-        return Mismatch
-      }
-    }
   }
   const fraction = (sym) => {
     // todo: eatEmitFork(sym, 'mid number', '0-9.*')
@@ -172,13 +141,12 @@ export const SymToJsonEvent = (next) => {
   const number = (sym) => {
     // we assume here that sym is a non-numeric symbol that terminates the number
     // note: eatemitvalue is not suitable here
-    // todo: or actually do eatemitvalue here -- just don't treat it as part of number it in the consumer
-    // OR: let this emit be for the previous symbol!
-    emitValue('close number')
+    // so this says that the previous symbol was the last of the number
+    emitValue(JsonEventType.closeNumber)
     // the terminating symbol is part of what comes after the number -- essentially a space or a comma or a parent close
     // let the standard flow handle that
 
-    // return value*|initial(sym)
+    // return value*|*value(sym)
     return self.push(sym)
   }
 
@@ -188,14 +156,17 @@ export const SymToJsonEvent = (next) => {
     if (parent === 'object' && sym === '}') {
       parents.pop()
       // could eatEmitValue just as well
-      // eatEmitValue(sym, 'close object')
-      return emitValue('close object')
+      // eatEmitValue(sym, JsonEventType.closeObject)
+      return emitValue(JsonEventType.closeObject)
     } 
     if (parent === 'array' && sym === ']') {
       parents.pop()
       // could eatEmitValue just as well
-      // eatEmitValue(sym, 'close array')
-      return emitValue('close array')
+      // eatEmitValue(sym, JsonEventType.closeArray)
+      return emitValue(JsonEventType.closeArray)
+    }
+    if (parent === 'top') {
+      return error(`Unexpected top-level symbol ${sym}`)
     }
     // if parent === 'top' error('unexpected top')
     return error(`Expected whitespace or comma or ${parent} close, got ${sym}`)
@@ -213,44 +184,73 @@ export const SymToJsonEvent = (next) => {
 
       // todo: prioritize? order by most often hit branches first
       switch (choiceId) {
-        case 'initial': {
-          const ret = value(sym)
-          if (ret === Mismatch) {
-            return error(`Unexpected top-level symbol ${sym}`)
+        case '*value': switch (sym) {
+          case '{': {
+            parents.push('object')
+            parents.push('key')
+            // todo: eatEmitFork(sym, JsonEventType.openObject, '*key')
+            return emit(JsonEventType.openObject, '*key')
           }
-          return ret
+          case '[': {
+            parents.push('array')
+            // todo: eatEmitFork(sym, openArray, '*value')
+            return emit(JsonEventType.openArray, '*value')
+          }
+          // todo: eatEmitFork(sym, JsonEventType.openString, '"*')
+          case '"': return emit(JsonEventType.openString, '"*')
+          // todo: eatEmitFork(sym, JsonEventType.openTrue, 't*rue')
+          case 't': return emit(JsonEventType.openTrue, 't*rue')
+          // todo: eatEmitFork(sym, JsonEventType.openFalse, 'f*alse')
+          case 'f': return emit(JsonEventType.openFalse, 'f*alse')
+          // todo: eatEmitFork(sym, JsonEventType.openNull, 'n*ull')
+          case 'n': return emit(JsonEventType.openNull, 'n*ull')
+          // todo: eatEmitFork(sym, JsonEventType.openNumber, '-*')
+          case '-': {
+            emit(JsonEventType.openNumber, '-*')
+            return eat(sym)
+          }
+          // todo: eatEmitFork(sym, JsonEventType.openNumber, '0*')
+          case '0': {
+            emit(JsonEventType.openNumber, '0*')
+            return eat(sym)
+          }
+          default: {
+            // todo: eatEmitFork(sym, JsonEventType.openNumber, '1-9*')
+            // todo: '1-9*' -> '[1-9]*'
+            if (isOneNine(sym)) {
+              emit(JsonEventType.openNumber, '1-9*')
+              return eat(sym)
+            }
+            if (isWhitespace(sym)) return eatPrefix(sym)
+            return closeParent(sym)
+          }
         }
-        case '*value': {
-          const ret = value(sym)
-          if (ret === Mismatch) return closeParent(sym)
-          return ret
-        } 
         case 'value*': {
           if (sym === ',') {
             const parent = parents[parents.length - 1]
 
             if (parent === 'object') {
               parents.push('key')
-              // todo: eatEmitFork(sym, 'comma', '*key')
-              return emit('comma', '*key')
+              // todo: eatEmitFork(sym, JsonEventType.comma, '*key')
+              return emit(JsonEventType.comma, '*key')
             } 
-            // todo: eatEmitFork(sym, 'comma', '*value')
-            if (parent === 'array') return emit('comma', '*value')
+            // todo: eatEmitFork(sym, JsonEventType.comma, '*value')
+            // todo: set comma flag here and crash if next is closeParent
+            if (parent === 'array') return emit(JsonEventType.comma, '*value')
             return error(`Unexpected parent ${parent}`)
           }
           if (isWhitespace(sym)) return eatPrefix(sym)
           return closeParent(sym)
         } 
         case '*key': {
-          // todo: eatEmitFork(sym, 'open key', '"*')
-          // todo: emit('open string')
-          if (sym === '"') return emit('open key', '"*')
+          // todo: eatEmitFork(sym, JsonEventType.openKey, '"*')
+          if (sym === '"') return emit(JsonEventType.openKey, '"*')
           if (sym === '}') {
             parents.pop()
             parents.pop()
             // eatemitvalue would work here too
-            // eatEmitValue(sym, 'close object')
-            return emitValue('close object')
+            // eatEmitValue(sym, JsonEventType.closeObject)
+            return emitValue(JsonEventType.closeObject)
           } 
           if (isWhitespace(sym)) return eatPrefix(sym)
           
@@ -260,9 +260,9 @@ export const SymToJsonEvent = (next) => {
           // todo: emit key either on +close string or :
           if (sym === ':') {
             parents.pop()
-            // alt: 'close key'
-            // todo: eatEmitFork(sym, 'colon', '*value')
-            return emit('colon', '*value')
+            // alt: JsonEventType.closeKey
+            // todo: eatEmitFork(sym, JsonEventType.colon, '*value')
+            return emit(JsonEventType.colon, '*value')
           } 
           if (isWhitespace(sym)) return eatPrefix(sym)
           
@@ -274,13 +274,13 @@ export const SymToJsonEvent = (next) => {
             // note: eatemitvalue
             // todo: eatEmitFork(sym, 'key', 'key*')
             // eat(sym)
-            if (parent === 'key') return emit('close key', 'key*')
+            if (parent === 'key') return emit(JsonEventType.closeKey, 'key*')
             // hmm
-            // todo: eatEmitValue(sym, 'close string')
-            return emitValue('close string')
+            // todo: eatEmitValue(sym, JsonEventType.closeString)
+            return emitValue(JsonEventType.closeString)
           } 
-          // todo: eatEmitFork(sym, 'escape', '\\*')
-          if (sym === '\\') return emit('escape', '\\*')
+          // todo: eatEmitFork(sym, JsonEventType.escape, '\\*')
+          if (sym === '\\') return emit(JsonEventType.escape, '\\*')
           
           const code = sym.charCodeAt(0)
           // todo: eatEmit(sym, 'mid string')
@@ -289,9 +289,9 @@ export const SymToJsonEvent = (next) => {
           return error(`Unexpected control character: ${code}`)
         } 
         case '\\*': {
+          // todo: replace includes with || ... -- maybe extracted
           if ('"\\/bfnrt'.includes(sym)) return eatFork(sym, '"*')
-          if (sym === 'u') return emit('open hex', '\\u*')
-          
+          if (sym === 'u') return emit(JsonEventType.openHex, '\\u*')
           return error(`Invalid escape character: ${sym}`)
         } 
         case '\\u*': {
@@ -306,18 +306,14 @@ export const SymToJsonEvent = (next) => {
               hexSeqIdx += 1
               return eat(sym)
             }
-
             hexSeqIdx = 0
-            return emit('close hex', '"*')
-          } 
-
+            return emit(JsonEventType.closeHex, '"*')
+          }
           return error(`Invalid hexadecimal escape character: ${sym}`)
         } 
         case '-*': {
           if (sym === '0') return eatFork(sym, '0*')
-          
           if (isOneNine(sym)) return eatFork(sym, '1-9*')
-
           return error(`Expected -[0-9], got -[${sym}]`)
         } 
         case '0*': return fraction(sym)
@@ -327,19 +323,15 @@ export const SymToJsonEvent = (next) => {
         } 
         case '0-9.*': {
           if (isZeroNine(sym)) return eatFork(sym, '0-9.0-9*')
-          
           return error(`Expected 0-9, got ${sym}`)
         } 
         case 'exp*': {
-          if ('+-'.includes(sym)) return eatFork(sym, 'exp+-*')
-          
+          if (sym === '+' || sym === '-') return eatFork(sym, 'exp+-*')
           if (isZeroNine(sym)) return eatFork(sym, 'exp+-0-9')
-
           return error(`Expected +-0..9, got ${sym}`)
         }
         case 'exp+-*': {
           if (isZeroNine(sym)) return eatFork(sym, 'exp+-0-9')
-
           return error(`Expected digit, got ${sym}`)
         } 
         case '1-90-9*': {
@@ -366,7 +358,7 @@ export const SymToJsonEvent = (next) => {
         case 'tru*e': {
           if (sym === 'e') {
             eat(sym)
-            return emitValue('close true')
+            return emitValue(JsonEventType.closeTrue)
           }
           return error(`Expected tru[e], got tru[${sym}]...`)
         } 
@@ -385,7 +377,7 @@ export const SymToJsonEvent = (next) => {
         case 'fals*e': {
           if (sym === 'e') {
             eat(sym)
-            return emitValue('close false')
+            return emitValue(JsonEventType.closeFalse)
           }
           return error(`Expected fals[e], got fals[${sym}]...`)
         } 
@@ -400,7 +392,7 @@ export const SymToJsonEvent = (next) => {
         case 'nul*l': {
           if (sym === 'l') {
             eat(sym)
-            return emitValue('close null')
+            return emitValue(JsonEventType.closeNull)
           }
           return error(`Expected nul[l], got nul[${sym}]...`)
         }
@@ -415,7 +407,7 @@ export const SymToJsonEvent = (next) => {
       isDone = true
 
       switch (choiceId) {
-        case 'initial': {
+        case '*value': {
           // todo? or push event, then call next.end() w/o args
           return next.end({
             id: 'end',
@@ -426,7 +418,7 @@ export const SymToJsonEvent = (next) => {
           if (['exp+-0-9', '1-9*', '1-90-9*', '0-9.0-9*', '0*'].includes(choiceId)) {
             if (parents[parents.length - 1] === 'top') {
               // eatemitvalue would not work here
-              emitValue('close number')
+              emitValue(JsonEventType.closeNumber)
               return next.end({
                 id: 'end',
               })
