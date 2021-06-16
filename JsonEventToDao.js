@@ -1,59 +1,153 @@
+import {JsonEventType} from './SymToJsonEvent.js'
+
 export const JsonEventToDao = () => {
   let ret = ''
   let depth = 0
+  let mode = 'top'
+  let isEmpty = [true]
 
   // note: what is lost in translation: top-level padding
   //   commas, colons
 
-  const ws = (buf) => buf.join('')
+  let hexBuf = ''
   return {
     push: (event) => {
       // console.log(event)
-      const {id, wsBuffer, buffer} = event
+      const {id} = event
 
-      if (['open object', 'open array'].includes(id)) {
-        // ret += ws(wsBuffer)
-        if (depth > 0) {
-          ret += ws(wsBuffer) + '['
-        }
-        depth += 1
-      } else if (['close object', 'close array'].includes(id)) {
-        ret += ws(wsBuffer)
-        depth -= 1
-        if (depth > 0) {
-          ret += ']'
-        }
-      } else if (id === 'string') {
-        if (depth > 0) {
-          ret += ws(wsBuffer) + '['
-        }
-        // todo: padding
-        // console.log(buffer)
-        ret += JSON.parse(buffer.join('')).replace(/(`|\[|\])/g, '`$1')
+      // todo: what about an array like [{}] or [[]]?
+      // vs isEmpty
+      // need a stack for arrays
 
-        if (depth > 0) {
-          ret += ']'
+      switch (mode) {
+        case 'top': switch (id) {
+          case JsonEventType.openString: {
+            ret += '['
+            mode = 'string'
+            isEmpty[isEmpty.length - 1] = false
+            break;
+          } 
+          case JsonEventType.openKey: {
+            mode = 'string'
+            isEmpty[isEmpty.length - 1] = false
+            break
+          } 
+          case JsonEventType.openNumber: {
+            ret += '['
+            mode = 'number'
+            isEmpty[isEmpty.length - 1] = false
+            break
+          } 
+          case JsonEventType.openObject:
+          case JsonEventType.openArray: {
+            isEmpty[isEmpty.length - 1] = false
+            ret += '['
+            isEmpty.push(true)
+            break
+          } 
+          case JsonEventType.closeObject: {
+            if (isEmpty[isEmpty.length - 1]) ret += '{}`|'
+            ret += ']'
+            isEmpty.pop()
+            break
+          } 
+          case JsonEventType.closeArray: {
+            if (isEmpty[isEmpty.length - 1]) ret += '`[`]`|'
+            ret += ']'
+            isEmpty.pop()
+            break
+          }
+          case JsonEventType.closeTrue: {
+            ret += '[true`|]'
+            isEmpty[isEmpty.length - 1] = false
+            break
+          } 
+          case JsonEventType.closeFalse: {
+            ret += '[false`|]'
+            isEmpty[isEmpty.length - 1] = false
+            break
+          } 
+          case JsonEventType.closeNull: {
+            ret += '[null`|]'
+            isEmpty[isEmpty.length - 1] = false
+            break
+          }
+          case JsonEventType.colon:
+          case JsonEventType.comma: {
+            // todo?
+            break
+          } 
+          case JsonEventType.whitespace: {
+            ret += event.sym
+            break
+          } 
+          default: throw Error(`unrecognized event ${id}`)
         }
-      } else if (['number', 'true', 'false', 'null'].includes(id)) {
-        if (depth > 0) {
-          ret += ws(wsBuffer) + '['
+        break
+        case 'string': switch (id) {
+          case JsonEventType.buffer: {
+            const {sym} = event
+            if ('[]`'.includes(sym)) ret += '`' + sym
+            else ret += sym
+            break
+          } 
+          case JsonEventType.escape: {
+            mode = 'escape'
+            break
+          } 
+          case JsonEventType.openHex: {
+            hexBuf = ''
+            mode = 'hex'
+            break
+          } 
+          case JsonEventType.closeString: {
+            ret += ']'
+            mode = 'top'
+            break
+          } 
+          case JsonEventType.closeKey: {
+            mode = 'top'
+            break
+          }
         }
-        ret += buffer.join('')
-        if (depth > 0) {
-          ret += ']'
+        break
+        case 'escape': if (id === JsonEventType.buffer) {
+          const {sym} = event
+          if (sym === 'n') ret += '\n'
+          else if (sym === 't') ret += '\t'
+          else if (sym === 'r') ret += '\r'
+          else if (sym === 'b') ret += '\b'
+          else if (sym === 'f') ret += '\f'
+          else if (sym === '"') ret += '"'
+          else if (sym === '\\') ret += '\\'
+          else if (sym === '/') ret += '/'
+          mode = 'string'
         }
-      } else if (id === 'key') {
-        ret += ws(wsBuffer)
-        ret += JSON.parse(buffer.join('')).replace(/(`|\[|\])/g, '`$1')
-      } else if (['comma', 'colon'].includes(id)) {
-        ret += ws(wsBuffer)
-      } else throw Error(`unrecognized event ${id}`)
+        break
+        case 'hex': if (id === JsonEventType.buffer) {
+          hexBuf += event.sym
+        } else if (id === JsonEventType.closeHex) {
+          ret += Number.parseInt(hexBuf, 16)
+          mode = 'string'
+        }
+        break
+        case 'number': if (id === JsonEventType.buffer) {
+          ret += event.sym
+        } else if (id === JsonEventType.closeNumber) {
+          ret += '`|]'
+          mode = 'top'
+        }
+        break
+        default: throw Error('unknown mode')
+      }
     },
     end: (event) => {
-      console.assert(event.id === 'end')
+      const r = ret
+      ret = ''
+      // console.assert(event.id === 'end')
       // ret += ws(event.wsBuffer)
       // console.log('dtao', ret)
-      return ret
+      return r
     },
   }
 }

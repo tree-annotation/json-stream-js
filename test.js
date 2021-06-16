@@ -1,5 +1,5 @@
 import {SymToJsonEvent} from './SymToJsonEvent.js'
-import {JsonEventToDao} from './JsonEventToDao.js'
+import { JsonEventToDao } from './JsonEventToDao.js'
 
 for (const [input, expected] of [
   [' "" ', ""],
@@ -12,6 +12,7 @@ for (const [input, expected] of [
   ['  { "z" : {  "a": "b", "c" : "d"} , "y": ["1", "2"] } ', ' z  [  a [b] c  [d]]  y [[1] [2]] '],
   ['  { "z" : {  "a": true, "c" : false} , "y": ["1", "2", null] } ', ' z  [  a [true] c  [false]]  y [[1] [2] [null]] '],
   ['[123.456e+12, -55.37, 5, 10.1, -12.34e-10, 0]', '[123.456e+12] [-55.37] [5] [10.1] [-12.34e-10] [0]'],
+  ['123.456e+12 -55.37 5 10.1 -12.34e-10 0', '[123.456e+12] [-55.37] [5] [10.1] [-12.34e-10] [0]'],
   ['0', '0'],
   [' 1000 ', '1000'],
   [' "\\u1234" ', '\u1234'],
@@ -64,7 +65,6 @@ for (const [input, expected] of [
 ]) {
   const stream = SymToJsonEvent(JsonEventToDao())
   const syms = input.split('')
-  let ret
   for (const c of syms) {
     const ret = stream.push(c)
     // todo: early exit
